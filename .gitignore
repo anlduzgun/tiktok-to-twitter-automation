@@ -1,0 +1,19 @@
+# Credentials
+#set_credentials.sh
+
+# Python cache and virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+venv/
+env/
+.venv/
+
+# Log files and downloaded videos
+*.log
+videos/
+
+# OS generated files
+.DS_Store
+Thumbs.db
