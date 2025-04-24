@@ -1,18 +1,21 @@
 import tweepy
 import os
 import logging
-import sys # Import sys for exiting
+import sys
 from yt_dlp import YoutubeDL
 import re
 from telegram import Update
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     MessageHandler,
-    Filters,
+    filters,
     ConversationHandler,
-    CallbackContext
+    ContextTypes
 )
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- Configuration ---
 VIDEOS_DIR = "videos"
@@ -30,10 +33,10 @@ ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
 # Basic check to ensure variables are loaded. Exit if any are missing.
 missing_creds = []
 if not TELEGRAM_TOKEN: missing_creds.append("TELEGRAM_TOKEN")
-if not CONSUMER_KEY: missing_creds.append("CONSUMER_KEY")
-if not CONSUMER_SECRET: missing_creds.append("CONSUMER_SECRET")
-if not ACCESS_TOKEN: missing_creds.append("ACCESS_TOKEN")
-if not ACCESS_TOKEN_SECRET: missing_creds.append("ACCESS_TOKEN_SECRET")
+#if not CONSUMER_KEY: missing_creds.append("CONSUMER_KEY")
+#if not CONSUMER_SECRET: missing_creds.append("CONSUMER_SECRET")
+#if not ACCESS_TOKEN: missing_creds.append("ACCESS_TOKEN")
+#if not ACCESS_TOKEN_SECRET: missing_creds.append("ACCESS_TOKEN_SECRET")
 
 if missing_creds:
     print(f"ERROR: Missing required environment variables: {', '.join(missing_creds)}")
@@ -48,7 +51,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logging.info("Bot starting...") # Log bot start
-
+"""
 # --- Twitter API Setup ---
 try:
     auth = tweepy.OAuth1UserHandler(
@@ -66,6 +69,7 @@ except Exception as e:
     print(f"ERROR: Failed to authenticate with Twitter API: {e}")
     print("Please check your Twitter API credentials in 'set_credentials.sh' and ensure they are correct and have the necessary permissions.")
     sys.exit(1) # Exit if Twitter auth fails
+"""
 
 # --- Conversation states ---
 URL, CAPTION = range(2)
@@ -121,7 +125,6 @@ def download_tiktok_video(url: str) -> str | None:
                          if os.path.exists(potential_path_sanitized):
                               downloaded_path = potential_path_sanitized
 
-
             if downloaded_path and os.path.exists(downloaded_path):
                 logging.info(f"Video downloaded successfully to: {downloaded_path}")
                 return downloaded_path
@@ -168,23 +171,42 @@ def post_to_twitter(video_path: str, caption: str) -> bool:
 
 # --- Telegram Bot Handlers ---
 
-def start(update: Update, context: CallbackContext) -> int:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Starts the conversation and asks for the URL."""
     user = update.effective_user
     logging.info(f"User {user.id} ({user.username}) started interaction.")
-    update.message.reply_text(
+    await update.message.reply_text(
         "Hi! Send me a TikTok video URL to download and tweet.\n\n"
         "You can use /cancel to stop at any time.\n"
         "Use /logs to see your past activity (if any)."
     )
     return URL
 
-def received_url(update: Update, context: CallbackContext) -> int:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send help message when /help command is issued."""
+    await update.message.reply_text(
+        "🤖 *TikTok to Twitter Bot Help* 🤖\n\n"
+        "*Commands:*\n"
+        "/start - Begin downloading and tweeting a TikTok video\n"
+        "/cancel - Cancel the current operation\n"
+        "/logs - View your activity logs\n"
+        "/help - Show this help message\n\n"
+        "*How to use:*\n"
+        "1. Start with /start command\n"
+        "2. Send a TikTok video URL\n"
+        "3. Provide a caption for your tweet (max 280 characters)\n"
+        "4. Wait for confirmation of successful tweeting\n\n"
+        "The bot will download the video, post it to Twitter with your caption, "
+        "and then clean up the file.",
+        parse_mode='Markdown'
+    )
+
+async def received_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Stores the URL and asks for the caption."""
     url = update.message.text.strip()
     # Basic URL validation (can be improved)
     if not re.match(r'https?://.*tiktok\.com/.*', url):
-        update.message.reply_text(
+        await update.message.reply_text(
             "That doesn't look like a valid TikTok URL. Please send a valid link, or use /cancel."
         )
         return URL # Stay in the same state
@@ -192,12 +214,12 @@ def received_url(update: Update, context: CallbackContext) -> int:
     context.user_data['url'] = url
     user = update.effective_user
     logging.info(f"User {user.id} provided URL: {url}")
-    update.message.reply_text(
+    await update.message.reply_text(
         "Great! Now send me the caption you want for your tweet (max 280 characters)."
     )
     return CAPTION
 
-def received_caption(update: Update, context: CallbackContext) -> int:
+async def received_caption(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Receives caption, downloads video, posts to Twitter, and cleans up."""
     caption = update.message.text.strip()
     url = context.user_data.get('url')
@@ -205,33 +227,34 @@ def received_caption(update: Update, context: CallbackContext) -> int:
 
     if not url:
          logging.warning(f"User {user.id} reached caption state without URL in context.")
-         update.message.reply_text("Something went wrong, URL not found. Please /start again.")
+         await update.message.reply_text("Something went wrong, URL not found. Please /start again.")
          return ConversationHandler.END
 
     # Optional: Caption length check (Twitter limit is 280)
     if len(caption) > 280:
-        update.message.reply_text(
+        await update.message.reply_text(
             f"Caption is too long ({len(caption)}/280 characters). Please send a shorter caption, or /cancel."
         )
         return CAPTION # Stay in caption state
 
     logging.info(f"User {user.id} provided caption: {caption}")
-    update.message.reply_text("⬇️ Downloading video...")
+    await update.message.reply_text("⬇️ Downloading video...")
 
+    # For potentially long operations, consider using context.application.create_task()
     video_path = download_tiktok_video(url)
 
     if not video_path:
-        update.message.reply_text("❌ Failed to download the video. Please check the link or try again later.")
+        await update.message.reply_text("❌ Failed to download the video. Please check the link or try again later.")
         logging.info(f"USER={user.id}\tDOWNLOAD_FAILED\tURL={url}")
         # Clean up user data
         context.user_data.clear()
         return ConversationHandler.END
 
-    update.message.reply_text("⬆️ Uploading to Twitter...")
+    await update.message.reply_text("⬆️ Uploading to Twitter...")
     success = post_to_twitter(video_path, caption)
 
     if success:
-        update.message.reply_text("✅ Video downloaded and tweeted successfully!")
+        await update.message.reply_text("✅ Video downloaded and tweeted successfully!")
         logging.info(f"USER={user.id}\tDOWNLOADED\tURL={url}\tFILE={video_path}")
         logging.info(f"USER={user.id}\tTWEETED\tFILE={video_path}\tCAPTION={caption}")
         # Clean up the downloaded video file
@@ -241,7 +264,7 @@ def received_caption(update: Update, context: CallbackContext) -> int:
         except OSError as e:
             logging.warning(f"USER={user.id}\tREMOVE_FAILED\tFILE={video_path}\tERROR={e}")
     else:
-        update.message.reply_text("❌ Failed to post the tweet. It might be a duplicate or a Twitter API issue. Check the logs for details.")
+        await update.message.reply_text("❌ Failed to post the tweet. It might be a duplicate or a Twitter API issue. Check the logs for details.")
         logging.info(f"USER={user.id}\tTWEET_FAILED\tFILE={video_path}")
         # Keep the file in case user wants to retry or debug? Or delete? Let's delete for now.
         try:
@@ -256,7 +279,7 @@ def received_caption(update: Update, context: CallbackContext) -> int:
     context.user_data.clear()
     return ConversationHandler.END
 
-def send_logs(update: Update, context: CallbackContext) -> None:
+async def send_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends the user their relevant log entries."""
     user = update.effective_user
     logging.info(f"User {user.id} requested logs.")
@@ -265,10 +288,10 @@ def send_logs(update: Update, context: CallbackContext) -> None:
             lines = f.readlines()
         # Filter logs for this specific user ID
         user_log_identifier = f"USER={user.id}\t"
-        user_lines = [line for line in lines if line.startswith(user_log_identifier) or user_log_identifier in line] # More robust check
+        user_lines = [line for line in lines if user_log_identifier in line] # More robust check
 
         if not user_lines:
-            update.message.reply_text("No activity logs found for your account yet.")
+            await update.message.reply_text("No activity logs found for your account yet.")
             return
 
         # Send logs in chunks to avoid hitting Telegram message limits
@@ -280,21 +303,19 @@ def send_logs(update: Update, context: CallbackContext) -> None:
             if char_count + len(line) + 4 > MAX_MSG_LENGTH: # +4 for ```\n
                 log_output += "```"
                 try:
-                    update.message.reply_text(log_output, parse_mode='MarkdownV2')
+                    await update.message.reply_text(log_output, parse_mode='MarkdownV2')
                 except Exception as e:
                      logging.warning(f"Failed to send log chunk to user {user.id}: {e}. Trying plain text.")
                      # Fallback for Markdown issues (less likely with simple logs)
                      try:
                          # Remove Markdown formatting for plain text fallback
-                         update.message.reply_text(log_output.replace('```\n','').replace('```',''))
+                         await update.message.reply_text(log_output.replace('```\n','').replace('```',''))
                      except Exception as fallback_e:
                          logging.error(f"Failed to send plain text log chunk either: {fallback_e}")
 
                 log_output = "```\n" # Start new chunk
                 char_count = len(log_output)
 
-            # Basic escaping for MarkdownV2 (less critical inside code blocks, but safer)
-            # line_escaped = line.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]') # etc. - might be overkill in code block
             log_output += line # Add line to current chunk
             char_count += len(line)
 
@@ -302,73 +323,95 @@ def send_logs(update: Update, context: CallbackContext) -> None:
         if log_output != "```\n": # Check if there's anything in the last chunk
             log_output += "```"
             try:
-                 update.message.reply_text(log_output, parse_mode='MarkdownV2')
+                await update.message.reply_text(log_output, parse_mode='MarkdownV2')
             except Exception as e:
                 logging.warning(f"Failed to send final log chunk to user {user.id}: {e}. Trying plain text.")
                 try:
-                     update.message.reply_text(log_output.replace('```\n','').replace('```',''))
+                    await update.message.reply_text(log_output.replace('```\n','').replace('```',''))
                 except Exception as fallback_e:
                     logging.error(f"Failed to send final plain text log chunk either: {fallback_e}")
 
 
     except FileNotFoundError:
         logging.warning("Log file not found when user requested logs.")
-        update.message.reply_text("Log file not found on the server.")
+        await update.message.reply_text("Log file not found on the server.")
     except Exception as e:
         logging.error(f"Error reading or sending logs for user {user.id}: {e}")
-        update.message.reply_text("An error occurred while retrieving your logs.")
+        await update.message.reply_text("An error occurred while retrieving your logs.")
 
 
-def cancel(update: Update, context: CallbackContext) -> int:
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancels the current operation."""
     user = update.effective_user
     logging.info(f"User {user.id} cancelled operation. Current data: {context.user_data}")
-    update.message.reply_text("Operation cancelled.")
+    await update.message.reply_text("Operation cancelled.")
     # Clean up user data
     context.user_data.clear()
     return ConversationHandler.END
 
-def error_handler(update: Update, context: CallbackContext) -> None:
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log Errors caused by Updates."""
-    logging.error(f'Update "{update}" caused error "{context.error}"')
+    logging.error(f'Update caused error: {context.error}')
     # Optionally inform user about generic error
-    # if update and update.message:
-    #    update.message.reply_text("An unexpected error occurred. Please try again later.")
+    # if update and hasattr(update, 'message') and update.message:
+    #    await update.message.reply_text("An unexpected error occurred. Please try again later.")
 
 
-def main() -> None:
-    """Starts the bot."""
-    if not TELEGRAM_TOKEN: # Final check here as well
-        print("ERROR: TELEGRAM_TOKEN not found in environment. Exiting.")
-        sys.exit(1)
 
-    updater = Updater(TELEGRAM_TOKEN)
-    dp = updater.dispatcher
+async def main_async() -> None:
+    # Create the Application
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Conversation handler for the main download/tweet flow
+    # Conversation handler setup
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            URL: [MessageHandler(Filters.text & ~Filters.command & Filters.regex(r'https?://.*tiktok\.com/.*'), received_url),
-                  MessageHandler(Filters.text & ~Filters.command, lambda u,c: u.message.reply_text("Please send a valid TikTok URL or /cancel.") or URL)], # Handle non-url text
-            CAPTION: [MessageHandler(Filters.text & ~Filters.command, received_caption)],
+            URL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'https?://.*tiktok\.com/.*'), received_url),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: u.message.reply_text("Please send a valid TikTok URL or /cancel.") or URL)
+            ],
+            CAPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_caption)],
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
 
-    dp.add_handler(conv_handler)
-    dp.add_handler(CommandHandler('logs', send_logs))
-    # Add the error handler
-    dp.add_error_handler(error_handler)
+    application.add_handler(conv_handler)
+    application.add_handler(CommandHandler('logs', send_logs))
+    application.add_handler(CommandHandler('help', help_command))
+    application.add_error_handler(error_handler)
 
-
-    # Start the Bot
     logging.info("Starting Telegram bot polling...")
-    updater.start_polling()
-    print("Bot is running. Press Ctrl+C to stop.") # Console message
-    updater.idle()
+    print("Bot is running. Press Ctrl+C to stop.")
+
+    # Start polling (this call manages its own event loop internally)
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
     logging.info("Bot stopped.")
 
-
 if __name__ == '__main__':
-    main()
+    # Create the Application
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Conversation handler setup
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            URL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'https?://.*tiktok\.com/.*'), received_url),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: u.message.reply_text("Please send a valid TikTok URL or /cancel.") or URL)
+            ],
+            CAPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_caption)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)]
+    )
+
+    application.add_handler(conv_handler)
+    application.add_handler(CommandHandler('logs', send_logs))
+    application.add_handler(CommandHandler('help', help_command))
+    application.add_error_handler(error_handler)
+
+    logging.info("Starting Telegram bot polling...")
+    print("Bot is running. Press Ctrl+C to stop.")
+
+    # Start polling
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    logging.info("Bot stopped.")
