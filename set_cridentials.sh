@@ -174,7 +174,7 @@ main() {
     print_banner
     
     # Uncomment these lines if you want to set up virtual environment by default
-    # setup_venv
+     setup_venv
     
     get_credentials
     create_env_file
