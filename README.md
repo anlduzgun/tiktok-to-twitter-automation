@@ -1,4 +1,4 @@
-# TikTok-to-Twitter Automation Bot
+# TikTok-to-Twitter Automation Bot v1
 
 A Telegram bot that downloads TikTok videos and automatically posts them to Twitter. Perfect for content creators who want to maintain a presence across platforms with minimal effort.
 
